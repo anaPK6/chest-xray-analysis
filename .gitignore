@@ -1,0 +1,23 @@
+# Data — CheXpert is ~22GB, download separately
+data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.ipynb_checkpoints/
+
+# Model weights: the trained checkpoint IS committed (28MB, under the
+# 100MB limit) so the repo is clone-and-run. Ignore everything else.
+*.pth
+*.ckpt
+!models/checkpoints/state_dict.pth
+
+# Node
+node_modules/
+dist/
+
+# Local artifacts
+.DS_Store
+assets/*.png
+uploads/

@@ -1,0 +1,14 @@
+torch
+torchvision
+torchxrayvision
+scikit-image
+pillow
+numpy
+matplotlib
+requests
+reportlab
+fastapi
+uvicorn[standard]
+python-multipart
+# optional, only needed if provider=openai
+# openai
