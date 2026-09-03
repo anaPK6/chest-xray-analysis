@@ -1,8 +1,3 @@
-"""Grad-CAM heatmaps (Phase 2).
-
-Highlights the image regions that drove a given pathology prediction. Uses a
-simple, dependency-light Grad-CAM on the DenseNet's final conv features.
-"""
 from __future__ import annotations
 
 import numpy as np
