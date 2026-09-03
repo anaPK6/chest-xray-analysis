@@ -13,10 +13,6 @@ class GradCAM:
         self.device = device
         self.activations = None
         self.gradients = None
-        # Hook the last dense block. Both torchxrayvision and torchvision
-        # DenseNet121 expose `features.denseblock4`. We deliberately hook the
-        # block (not `model.features`) because an in-place F.relu follows the
-        # features container, and a backward hook on that view is forbidden.
         target_layer = self._find_target_layer(model)
         target_layer.register_forward_hook(self._save_activations)
         target_layer.register_full_backward_hook(self._save_gradients)
@@ -47,8 +43,6 @@ class GradCAM:
         self.model.zero_grad()
         out[0, class_idx].backward()
 
-        # weight each activation map by its mean gradient (channel importance).
-        # ReLU the activations here since we hook before the model's own relu.
         acts = F.relu(self.activations)
         weights = self.gradients.mean(dim=(2, 3), keepdim=True)
         cam = F.relu((weights * acts).sum(dim=1)).squeeze(0)
