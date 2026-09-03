@@ -1,17 +1,3 @@
-"""FastAPI backend wrapping the chest X-ray pipeline.
-
-Endpoints:
-  GET  /health            -> liveness + device + available LLM providers
-  GET  /model             -> model info (source, arch, mean/per-label AUROC)
-  POST /analyze           -> probabilities, findings, top-finding Grad-CAM (base64 PNG)
-  POST /gradcam           -> Grad-CAM (base64 PNG) for one chosen pathology
-  POST /report            -> LLM radiology report for given findings + provider
-  POST /chat              -> RAG chatbot: answer a question about the X-ray + sources
-  POST /pdf               -> PDF bytes for a report
-
-The heavy vision model loads once at startup; the LLM provider is chosen per
-request so the UI toggle can switch Ollama/OpenAI live.
-"""
 from __future__ import annotations
 
 import base64
@@ -37,7 +23,6 @@ app = FastAPI(title="AI Chest X-ray Analysis API")
 
 app.add_middleware(
     CORSMiddleware,
-    # Vite dev server — it picks the next free port if 5173 is taken
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1):51[0-9]{2}",
     # backend runs on :8010 (port 8000 is used by another local app)
     allow_methods=["*"],
@@ -93,7 +78,7 @@ async def analyze(file: UploadFile = File(...)):
     except Exception:
         raise HTTPException(400, "Could not read image")
 
-    # Reject non-chest-X-ray uploads up front — don't run the model on them.
+    # Reject non-chest-X-ray uploads up front ,don't run the model on them.
     guard = xray_likeness(pil_img)
     if not guard["is_xray"]:
         reason = guard["reasons"][0] if guard["reasons"] else "does not look like a chest X-ray"
