@@ -38,17 +38,29 @@ export default function App() {
   const [reportBusy, setReportBusy] = useState(false);
   const [error, setError] = useState(null);
   const [showEval, setShowEval] = useState(false);
+  const [rejected, setRejected] = useState(null);
+  const [chatOpen, setChatOpen] = useState(true);
   const fileInput = useRef(null);
 
   // chat
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
-  const chatEndRef = useRef(null);
+  const chatLogRef = useRef(null);
 
   useEffect(() => {
     api.health().catch(() => setError("Backend not reachable — start FastAPI on :8010"));
   }, []);
+
+  function scrollChatToBottom() {
+    requestAnimationFrame(() => {
+      const el = chatLogRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
+  }
+
+  // keep the newest message in view as it streams in
+  useEffect(scrollChatToBottom, [messages, chatBusy]);
 
   function pickFile(f) {
     if (!f) return;
@@ -58,7 +70,11 @@ export default function App() {
     setCamLabel(null); setCamOverlay(null); setMessages([]);
   }
 
-  const [rejected, setRejected] = useState(null);
+  function clearFile() {
+    setFile(null); setPreview(null); setAnalysis(null); setReport(null);
+    setCamLabel(null); setCamOverlay(null); setMessages([]); setRejected(null);
+    if (fileInput.current) fileInput.current.value = "";
+  }
 
   async function runAnalyze() {
     if (!file) return;
@@ -70,7 +86,6 @@ export default function App() {
       setCamOverlay(a.overlay);
     } catch (e) {
       if (e.rejected) {
-        // not a chest X-ray — block: drop the image, show rejection, no results
         setRejected(e.message);
         setAnalysis(null); setPreview(null); setFile(null);
         setCamLabel(null); setCamOverlay(null);
@@ -103,8 +118,8 @@ export default function App() {
     setReportBusy(false);
   }
 
-  async function sendChat() {
-    const text = chatInput.trim();
+  async function sendChat(preset) {
+    const text = (preset ?? chatInput).trim();
     if (!text || chatBusy) return;
     const history = messages.map(({ role, content }) => ({ role, content }));
     const next = [...messages, { role: "user", content: text }];
@@ -118,7 +133,7 @@ export default function App() {
       setMessages([...next, { role: "assistant", content: `⚠️ ${e.message}`, error: true }]);
     }
     setChatBusy(false);
-    setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+    scrollChatToBottom();
   }
 
   async function downloadPdf() {
@@ -135,6 +150,9 @@ export default function App() {
   const threshold = analysis?.findings?.threshold ?? 0.5;
   const positives = probsSorted.filter(([, v]) => v >= threshold);
   const considered = probsSorted.filter(([, v]) => v < threshold);
+  const top = probsSorted[0];
+
+  const sizeMb = file ? (file.size / 1024 / 1024).toFixed(1) : null;
 
   return (
     <div className="app">
@@ -152,141 +170,219 @@ export default function App() {
         ⚠️ Research / education demo — <strong>not a diagnostic tool</strong>.
       </div>
 
-      {!preview && (
-        <>
+      <div className="layout">
+        {/* ---------------- LEFT: upload ---------------- */}
+        <section className="panel upload-col">
+          <div className="panel-head col">
+            <h2>Upload Chest X-ray</h2>
+            <div className="muted sm">Drag and drop your image here, or click to browse</div>
+          </div>
+
           {rejected && (
             <div className="guard-reject">
               ❌ <strong>Image rejected.</strong> {rejected}
             </div>
           )}
-          <div className="dropzone big" onClick={() => fileInput.current?.click()}
+
+          <div
+            className="dropzone"
+            onClick={() => fileInput.current?.click()}
             onDrop={(e) => { e.preventDefault(); pickFile(e.dataTransfer.files[0]); }}
-            onDragOver={(e) => e.preventDefault()}>
-            <input ref={fileInput} type="file" accept="image/*"
+            onDragOver={(e) => e.preventDefault()}
+          >
+            <input ref={fileInput} type="file" accept="image/*" hidden
               onChange={(e) => pickFile(e.target.files[0])} />
             <div className="dz-icon">🫁</div>
-            <div className="dz-title">Drop a chest X-ray, or click to browse</div>
+            <div className="dz-title">Drag &amp; Drop Chest X-ray</div>
             <div className="hint">PNG / JPG · frontal chest X-ray only</div>
-          </div>
-        </>
-      )}
-
-      {preview && (
-        <>
-          {/* TOP STRIP — compact imaging + findings */}
-          <div className="strip">
-            <section className="panel viewer compact">
-              <div className="panel-head">
-                <h2>Imaging</h2>
-                <div className="row gap">
-                  <button className="btn ghost sm" onClick={() => fileInput.current?.click()}>Change</button>
-                  <input ref={fileInput} type="file" accept="image/*" hidden
-                    onChange={(e) => pickFile(e.target.files[0])} />
-                  <button className="btn sm" onClick={runAnalyze} disabled={busy}>
-                    {busy ? <span className="spinner" /> : analysis ? "Re-analyze" : "Analyze"}
-                  </button>
-                </div>
-              </div>
-              <div className="img-frame">
-                <img src={preview} alt="x-ray" className="base-img" />
-                {camOverlay && <img src={camOverlay} alt="grad-cam" className="cam-img" style={{ opacity }} />}
-                {camBusy && <div className="cam-loading"><span className="spinner" /></div>}
-                {camLabel && <div className="cam-tag">Grad-CAM · {camLabel}</div>}
-              </div>
-              {analysis && (
-                <div className="opacity-ctl">
-                  <span className="muted sm">Heatmap</span>
-                  <input type="range" min="0" max="1" step="0.05" value={opacity}
-                    onChange={(e) => setOpacity(parseFloat(e.target.value))} />
-                  <span className="muted sm">{Math.round(opacity * 100)}%</span>
-                </div>
-              )}
-            </section>
-
-            <section className="panel findings compact">
-              <div className="panel-head"><h2>Findings</h2>
-                {analysis && <span className="muted sm">threshold {fmtPct(threshold)}</span>}
-              </div>
-              {!analysis && <div className="empty">Run <b>Analyze</b> to detect pathologies.</div>}
-              {analysis && (
-                <div className="findings-scroll">
-                  <div className="group-label pos">Positive ({positives.length})</div>
-                  {positives.length === 0
-                    ? <div className="muted sm pad">None above threshold.</div>
-                    : positives.map(([k, v]) => (
-                        <PathologyRow key={k} label={k} value={v} positive
-                          active={k === camLabel} onClick={() => showCam(k)} />
-                      ))}
-                  <div className="group-label">Considered</div>
-                  {considered.map(([k, v]) => (
-                    <PathologyRow key={k} label={k} value={v}
-                      active={k === camLabel} onClick={() => showCam(k)} />
-                  ))}
-                  <div className="report-inline">
-                    <button className="btn accent sm full" onClick={runReport} disabled={reportBusy}>
-                      {reportBusy ? <span className="spinner" /> : report ? "Regenerate report" : "Generate report"}
-                    </button>
-                    {report != null && (
-                      <>
-                        <textarea className="report-edit" value={report}
-                          onChange={(e) => setReport(e.target.value)} rows={6} />
-                        <div className="row end"><button className="btn ghost sm" onClick={downloadPdf}>⬇️ PDF</button></div>
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-            </section>
+            <span className="btn ghost sm dz-btn">Browse Files</span>
           </div>
 
-          {/* MAIN — full-width chat */}
-          <section className="panel chat-main">
-            <div className="panel-head">
-              <h2>Ask about this X-ray</h2>
-              <span className="chip sm">RAG · nomic-embed · llama3.1</span>
+          {preview && (
+            <div className="uploaded">
+              <div className="uploaded-head">Uploaded Image</div>
+              <div className="uploaded-row">
+                <img src={preview} alt="x-ray thumbnail" className="thumb" />
+                <div className="uploaded-meta">
+                  <div className="fname" title={file?.name}>{file?.name}</div>
+                  <div className="muted sm">{sizeMb} MB</div>
+                  <div className="ok sm">✓ Upload complete</div>
+                </div>
+                <button className="icon-btn" title="Remove image" onClick={clearFile}>🗑</button>
+              </div>
+              <button className="btn accent full" onClick={runAnalyze} disabled={busy}>
+                {busy ? <span className="spinner" /> : analysis ? "Re-analyze" : "Analyze X-ray"}
+              </button>
             </div>
+          )}
+        </section>
 
-            <div className="chat-log big">
-              {messages.length === 0 && (
-                <div className="chat-hint">
-                  <div className="muted">Ask about the findings or the pathologies. Try:</div>
-                  <div className="chat-suggest row">
-                    {["Which findings were flagged and why?",
-                      "What is pleural effusion?",
-                      "What does the Grad-CAM heatmap show?",
-                      "Should the top finding be a concern?"].map((q) => (
-                      <button key={q} className="suggest" onClick={() => setChatInput(q)}>{q}</button>
-                    ))}
+        {/* ---------------- RIGHT: results ---------------- */}
+        <section className="panel results-col">
+          <div className="panel-head">
+            <h2>AI Analysis Results</h2>
+            {analysis && <span className="chip sm">Analyzed just now</span>}
+          </div>
+
+          {!analysis && (
+            <div className="empty tall">
+              {preview
+                ? <>Click <b>Analyze X-ray</b> to detect pathologies.</>
+                : <>Upload a chest X-ray to see results here.</>}
+            </div>
+          )}
+
+          {analysis && (
+            <>
+              {/* headline: top finding + confidence */}
+              <div className="headline">
+                <div className="headline-cell">
+                  <div className="hl-label">Top Finding</div>
+                  <div className={`hl-value ${top[1] >= threshold ? "pos" : ""}`}>
+                    {top[0]}{top[1] >= threshold ? " Detected" : " (below threshold)"}
                   </div>
                 </div>
-              )}
-              {messages.map((m, i) => (
-                <div key={i} className={`msg ${m.role} ${m.error ? "err" : ""}`}>
-                  <div className="msg-body">{m.content}</div>
-                  {m.sources?.length > 0 && (
-                    <div className="msg-sources">
-                      {m.sources.map((s) => (
-                        <span key={s.pathology + s.section} className="src-chip">
-                          {s.pathology} · {s.section}
-                        </span>
-                      ))}
-                    </div>
+                <div className="headline-cell">
+                  <div className="hl-label">Confidence Score</div>
+                  <div className="hl-conf">
+                    <span className="hl-pct">{fmtPct(top[1])}</span>
+                    <div className="conf-track"><div className="conf-fill" style={{ width: `${top[1] * 100}%` }} /></div>
+                  </div>
+                  <div className="conf-scale"><span>0%</span><span>50%</span><span>100%</span></div>
+                </div>
+              </div>
+
+              {/* summary */}
+              <div className="summary">
+                <div className="hl-label">Summary</div>
+                <p>
+                  {positives.length > 0 ? (
+                    <>The model flagged <strong>{positives.length}</strong>{" "}
+                      {positives.length === 1 ? "finding" : "findings"} at or above the{" "}
+                      {fmtPct(threshold)} threshold:{" "}
+                      <strong>{positives.map(([k]) => k).join(", ")}</strong>. Select any pathology
+                      below to see where the model looked. Correlate clinically before drawing
+                      conclusions.</>
+                  ) : (
+                    <>No pathology reached the {fmtPct(threshold)} threshold. The highest score was{" "}
+                      <strong>{top[0]}</strong> at {fmtPct(top[1])}. Select any pathology below to
+                      inspect its Grad-CAM heatmap.</>
                   )}
-                </div>
-              ))}
-              {chatBusy && <div className="msg assistant"><span className="spinner" /></div>}
-              <div ref={chatEndRef} />
-            </div>
+                </p>
+              </div>
 
-            <div className="chat-input">
-              <input value={chatInput} onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && sendChat()}
-                placeholder={analysis ? "Ask a question about this X-ray…" : "Analyze an image first, then ask…"} />
-              <button className="btn" onClick={sendChat} disabled={chatBusy || !chatInput.trim()}>Send</button>
-            </div>
-          </section>
-        </>
-      )}
+              {/* side-by-side viewer */}
+              <div className="viewer-grid">
+                <figure className="vpane">
+                  <figcaption>Original X-ray</figcaption>
+                  <div className="img-frame"><img src={preview} alt="original x-ray" className="base-img" /></div>
+                </figure>
+                <figure className="vpane">
+                  <figcaption>Grad-CAM Heatmap {camLabel && <span className="muted">· {camLabel}</span>}</figcaption>
+                  <div className="img-frame">
+                    <img src={preview} alt="x-ray" className="base-img" />
+                    {camOverlay && <img src={camOverlay} alt="grad-cam" className="cam-img" style={{ opacity }} />}
+                    {camBusy && <div className="cam-loading"><span className="spinner" /></div>}
+                  </div>
+                  <div className="opacity-ctl">
+                    <span className="muted sm">Heatmap</span>
+                    <input type="range" min="0" max="1" step="0.05" value={opacity}
+                      onChange={(e) => setOpacity(parseFloat(e.target.value))} />
+                    <span className="muted sm">{Math.round(opacity * 100)}%</span>
+                  </div>
+                </figure>
+              </div>
+
+              {/* all pathologies */}
+              <div className="findings-block">
+                <div className="group-label pos">Positive ({positives.length})</div>
+                {positives.length === 0
+                  ? <div className="muted sm pad">None above threshold.</div>
+                  : positives.map(([k, v]) => (
+                      <PathologyRow key={k} label={k} value={v} positive
+                        active={k === camLabel} onClick={() => showCam(k)} />
+                    ))}
+                <div className="group-label">Considered</div>
+                {considered.map(([k, v]) => (
+                  <PathologyRow key={k} label={k} value={v}
+                    active={k === camLabel} onClick={() => showCam(k)} />
+                ))}
+              </div>
+
+              {/* report */}
+              <div className="report-inline">
+                <button className="btn accent full" onClick={runReport} disabled={reportBusy}>
+                  {reportBusy ? <span className="spinner" /> : report ? "Regenerate report" : "📄 Generate Radiology Report"}
+                </button>
+                {report != null && (
+                  <>
+                    <textarea className="report-edit" value={report}
+                      onChange={(e) => setReport(e.target.value)} rows={8} />
+                    <div className="row end">
+                      <button className="btn ghost sm" onClick={downloadPdf}>⬇️ Download Analysis Report (PDF)</button>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* assistant */}
+              <div className="assistant">
+                <button className="assistant-head" onClick={() => setChatOpen((o) => !o)}>
+                  <span className="ah-title">✦ AI Assistant</span>
+                  <span className="ah-meta muted sm">RAG · nomic-embed · llama3.1</span>
+                  <span className="ah-caret">{chatOpen ? "⌃" : "⌄"}</span>
+                </button>
+
+                {chatOpen && (
+                  <>
+                    <div className="chat-log" ref={chatLogRef}>
+                      <div className="msg assistant">
+                        <div className="msg-body">Hello! I'm your AI assistant. Ask me anything about this X-ray.</div>
+                      </div>
+                      {messages.length === 0 && (
+                        <div className="chat-suggest">
+                          {["What are the signs of the top finding in this X-ray?",
+                            "How confident is the model in this prediction?",
+                            "What other conditions can cause similar patterns?"].map((q) => (
+                            <button key={q} className="suggest" onClick={() => sendChat(q)}>{q}</button>
+                          ))}
+                        </div>
+                      )}
+                      {messages.map((m, i) => (
+                        <div key={i} className={`msg ${m.role} ${m.error ? "err" : ""}`}>
+                          <div className="msg-body">{m.content}</div>
+                          {m.sources?.length > 0 && (
+                            <div className="msg-sources">
+                              {m.sources.map((s) => (
+                                <span key={s.pathology + s.section} className="src-chip">
+                                  {s.pathology} · {s.section}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      {chatBusy && <div className="msg assistant"><span className="spinner" /></div>}
+                    </div>
+
+                    <div className="chat-input">
+                      <input value={chatInput} onChange={(e) => setChatInput(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && sendChat()}
+                        placeholder="Type your question…" />
+                      <button className="btn icon-send" onClick={() => sendChat()}
+                        disabled={chatBusy || !chatInput.trim()} title="Send">→</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+        </section>
+      </div>
+
+      <footer className="foot">
+        🛡 AI analysis for educational and informational purposes only. Not a substitute for professional medical advice.
+      </footer>
 
       {error && <div className="toast error">{error}</div>}
     </div>
